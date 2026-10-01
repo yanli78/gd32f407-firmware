@@ -35,7 +35,7 @@ OF SUCH DAMAGE.
 #include "gd32f4xx.h"
 #include "systick.h"
 
-volatile static uint32_t delay;
+static volatile uint32_t delay;
 
 /*!
     \brief      configure systick

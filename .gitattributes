@@ -1,0 +1,30 @@
+# 固件工程里同时存在 Keil XML 与厂商库文件，默认不做换行转换，
+# 避免 checkout 时改动第三方代码；自有源码统一为 LF。
+* -text
+
+/APP/Driver/**          text eol=lf
+/APP/Function/**        text eol=lf
+/APP/HeaderFiles/**     text eol=lf
+/APP/Protocol/**        text eol=lf
+/APP/Startup/**         text eol=lf
+/APP/User/**            text eol=lf
+/APP/project/**         text eol=lf
+/Bootloader/Driver/**   text eol=lf
+/Bootloader/Function/** text eol=lf
+/Bootloader/HeaderFiles/** text eol=lf
+/Bootloader/Protocol/** text eol=lf
+/Bootloader/Startup/**  text eol=lf
+/Bootloader/User/**     text eol=lf
+/Bootloader/project/**  text eol=lf
+
+# 厂商库（GigaDevice）保持原样
+/APP/Library/**         -text
+/APP/CMSIS/**           -text
+/Bootloader/Library/**  -text
+/Bootloader/CMSIS/**    -text
+
+# 二进制/生成物
+*.hex   -text
+*.bin   -text
+*.elf   -text
+*.zip   -text
