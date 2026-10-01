@@ -1,0 +1,39 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    name: Build APP + Bootloader (GNU Arm Embedded)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi make
+
+      - name: Show toolchain version
+        run: arm-none-eabi-gcc --version
+
+      - name: Build
+        run: make -j"$(nproc)"
+
+      - name: Section sizes
+        run: make size
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gd32f407-firmware
+          if-no-files-found: error
+          path: |
+            build/*.elf
+            build/*.hex
+            build/*.bin
+            build/*.map

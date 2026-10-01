@@ -19,6 +19,10 @@ CC       := $(CROSS)gcc
 OBJCOPY  := $(CROSS)objcopy
 SIZE     := $(CROSS)size
 
+# 目标文件规则是用 $(eval) 生成的，会先于下面的 all 出现；
+# 显式指定默认目标，保证直接执行 make 就是构建全部。
+.DEFAULT_GOAL := all
+
 # ------------------------------------------------- portable shell helpers ---
 ifeq ($(OS),Windows_NT)
   MKDIR = if not exist "$(subst /,\,$1)" mkdir "$(subst /,\,$1)"
@@ -34,8 +38,13 @@ OPT      ?= -O2
 WARN     := -Wall -Wextra
 CFLAGS   := $(CPUFLAGS) $(OPT) -std=gnu11 $(WARN) -g3 \
             -ffunction-sections -fdata-sections -fno-strict-aliasing
-LDFLAGS  := $(CPUFLAGS) $(OPT) -nostartfiles -Wl,--gc-sections
-LDLIBS   := --specs=nano.specs --specs=nosys.specs -lc
+LDFLAGS  := $(CPUFLAGS) $(OPT) -Wl,--gc-sections
+# 只用 newlib-nano，不链接 libnosys：libnosys 提供的是“永远失败”的空桩
+# （链接时会打印 _read/_write 未实现的警告），而 APP 自带 User/syscalls.c，
+# Bootloader 又不需要任何 libc 输入输出。crti.o 提供 __libc_init_array 需要的
+# _init/_fini；crt0 的 _start 用不到，会被 --gc-sections 丢掉，
+# 真正入口由链接脚本的 ENTRY(Reset_Handler) 决定。
+LDLIBS   := --specs=nano.specs
 
 DEFS     := -DUSE_STDPERIPH_DRIVER -DGD32F470
 
@@ -48,9 +57,8 @@ CMSIS    := CMSIS/GD/GD32F4xx
 # ------------------------------------------------------------------ app config
 APP_NAME   := CIMC_GD32_Template
 APP_DEFS   := $(DEFS) -DAPP_IMAGE
-# nano.specs omits float support in printf/snprintf by default; the alarm
-# records are formatted with "%.2f", so pull the float formatter back in.
-APP_LDLIBS := $(LDLIBS) -u _printf_float
+# nano.specs 默认不带浮点格式化，而报警记录用 "%.2f" 输出，需要显式拉回。
+APP_LDLIBS := -u _printf_float $(LDLIBS)
 APP_LD     := $(APP)/project/gd32f470ve_app.ld
 APP_INC    := \
 	$(APP)/CMSIS \
