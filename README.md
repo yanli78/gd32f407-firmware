@@ -69,6 +69,8 @@ make clean
 | APP | 41012 B / 128 KB（31.3%） | 137720 B / 192 KB（70.1%） | `build/CIMC_GD32_Template.{elf,hex,bin}` |
 | Bootloader | 9136 B / 64 KB（13.9%） | 134344 B / 192 KB（68.3%） | `build/CIMC_BOOT.{elf,hex,bin}` |
 
+> 上表为 arm-none-eabi-gcc 15.2.1 的结果；CI 用的 Ubuntu 包（gcc 13.2）分别为
+> APP 45460 B、Bootloader 8948 B，不同工具链版本间有几百字节到 4 KB 的正常差异。
 > RAM 占用的大头是升级镜像接收缓冲（128 KB `.bss`）。
 > 原来的 Keil AC5 工程在 `-O0` 下的参考值：APP Code 20250 + RO 6842 字节，Bootloader Code 7122 + RO 970 字节。
 
