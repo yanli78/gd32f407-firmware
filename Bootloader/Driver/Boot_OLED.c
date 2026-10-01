@@ -69,23 +69,26 @@ static void oled_write(uint8_t data, uint8_t cmd)
     iic_start(); iic_send(OLED_ADDR); iic_send(cmd == 0U ? 0x00U : 0x40U); iic_send(data); iic_stop();
 }
 
-static void oled_clear(void)
+/* 设置页地址 + 列地址：3 个命令字节合并到一次 IIC 传输，
+   一次整屏刷新由 12 次 START/STOP 降到 4 次 */
+static void oled_set_page(uint8_t page)
 {
-    uint8_t p, x;
+    iic_start(); iic_send(OLED_ADDR); iic_send(0x00U);
+    iic_send(0xB0U + page); iic_send(0x00U); iic_send(0x10U);
+    iic_stop();
+}
+
+/* 只清显存，不刷新屏幕 */
+static void oled_clear_gram(void)
+{
     memset(oled_gram, 0, sizeof(oled_gram));
-    for(p = 0U; p < 4U; p++) {
-        oled_write(0xB0U + p, 0U); oled_write(0x00U, 0U); oled_write(0x10U, 0U);
-        iic_start(); iic_send(OLED_ADDR); iic_send(0x40U);
-        for(x = 0U; x < 128U; x++) iic_send(0x00U);
-        iic_stop();
-    }
 }
 
 static void oled_refresh(void)
 {
     uint8_t p, x;
     for(p = 0U; p < 4U; p++) {
-        oled_write(0xB0U + p, 0U); oled_write(0x00U, 0U); oled_write(0x10U, 0U);
+        oled_set_page(p);
         iic_start(); iic_send(OLED_ADDR); iic_send(0x40U);
         for(x = 0U; x < 128U; x++) iic_send(oled_gram[x][p]);
         iic_stop();
@@ -144,7 +147,7 @@ static void oled_show_string_1608(uint8_t x, uint8_t y, const char *text)
 
 void Boot_OLED_Show(void)
 {
-    oled_clear();
+    oled_clear_gram();
     oled_show_string_1608(0U, 0U, "2026413756");
     oled_show_string_1608(0U, 16U, "Bootloader");
     oled_refresh();
@@ -162,6 +165,5 @@ void Boot_OLED_Init(void)
     oled_write(0x00U,0U); oled_write(0xD5U,0U); oled_write(0x80U,0U); oled_write(0xD9U,0U); oled_write(0xF1U,0U); oled_write(0xDAU,0U);
     oled_write(0x00U,0U); oled_write(0xDBU,0U); oled_write(0x40U,0U); oled_write(0x20U,0U); oled_write(0x02U,0U); oled_write(0x8DU,0U);
     oled_write(0x14U,0U); oled_write(0xA4U,0U); oled_write(0xA6U,0U); oled_write(0xAFU,0U);
-    oled_clear();
-    Boot_OLED_Show();
+    Boot_OLED_Show();   /* 清显存 + 绘制 + 刷新，一次整屏写入 */
 }

@@ -49,15 +49,16 @@ static void put_u16(uint8_t *b, uint16_t *idx, uint16_t v)
     b[(*idx)++] = (uint8_t)(v >> 8U); b[(*idx)++] = (uint8_t)v;
 }
 
-static uint8_t ascii_to_bytes(const uint8_t *ascii, uint16_t ascii_len, uint8_t *out, uint16_t *out_len)
+static uint8_t ascii_to_bytes(const uint8_t *ascii, uint16_t ascii_len, uint8_t *out, uint16_t out_cap, uint16_t *out_len)
 {
     uint16_t i;
     uint8_t h, l;
     if((ascii_len & 1U) != 0U) return 0U;
     *out_len = ascii_len / 2U;
+    if(*out_len > out_cap) { *out_len = 0U; return 0U; }
     for(i = 0U; i < *out_len; i++) {
         h = hex_value(ascii[i * 2U]); l = hex_value(ascii[i * 2U + 1U]);
-        if((h > 0x0FU) || (l > 0x0FU)) return 0U;
+        if((h > 0x0FU) || (l > 0x0FU)) { *out_len = 0U; return 0U; }
         out[i] = (uint8_t)((h << 4U) | l);
     }
     return 1U;
@@ -69,6 +70,7 @@ static void send_frame(uint16_t id, uint8_t type, uint16_t cmd, const uint8_t *p
     char out[128];
     uint16_t idx = 0U;
     uint16_t i, crc;
+    if(len > 32U) return;    /* 13 + 32 = 45 字节帧 -> 90 个字符，两个缓冲都不会溢出 */
     put_u16(frame, &idx, 0xA5B6U); put_u16(frame, &idx, id); frame[idx++] = type; put_u16(frame, &idx, cmd); frame[idx++] = len; frame[idx++] = BOOT_VERSION;
     for(i = 0U; i < len; i++) frame[idx++] = payload[i];
     crc = crc16(frame, idx); put_u16(frame, &idx, crc); put_u16(frame, &idx, 0xB6A5U);
@@ -163,18 +165,21 @@ void Boot_Protocol_Init(uint16_t device_id)
     boot_device_id = device_id;
 }
 
+/* 收帧缓冲放在静态区：原来放在栈上，处理一帧要占 384 字节栈空间 */
+static uint8_t boot_frame[128];
+static uint8_t boot_ascii[RS485_RX_BUF_LEN];
+
 void Boot_Protocol_Process(void)
 {
-    uint8_t frame[128];
     uint16_t len;
-    uint8_t ascii[RS485_RX_BUF_LEN];
     uint16_t ascii_len;
     if(Boot_RS485_RawFinished() != 0U) {
         if(store_upgrade() != 0U) send_ok(0x0502U); else send_cmd_error(0x0502U);
         return;
     }
-    if(Boot_RS485_GetFrame(ascii, &ascii_len) != 0U) {
-        if(ascii_to_bytes(ascii, ascii_len, frame, &len) != 0U) handle_frame(frame, len); else send_error();
+    if(Boot_RS485_GetFrame(boot_ascii, &ascii_len) != 0U) {
+        if(ascii_to_bytes(boot_ascii, ascii_len, boot_frame, sizeof(boot_frame), &len) != 0U) handle_frame(boot_frame, len);
+        else send_error();
     }
 }
 

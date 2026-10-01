@@ -29,17 +29,33 @@ static void jump_to_app(void)
     ((void (*)(void))pc)();
 }
 
-static void boot_wait_print(uint32_t left_s, uint8_t *last_print)
+/* 倒计时提示：剩 10/7/4/1 秒时各打印一次（消息与原实现逐字一致） */
+static const char *const boot_wait_msg[] = {
+    "wait for start Application(10s)......\r\n",
+    "wait for start Application(7s)......\r\n",
+    "wait for start Application(4s)......\r\n",
+    "wait for start Application(1s)......\r\n"
+};
+static const uint8_t boot_wait_sec[] = { 10U, 7U, 4U, 1U };
+#define BOOT_WAIT_STEPS  (sizeof(boot_wait_msg) / sizeof(boot_wait_msg[0]))
+
+static void boot_wait_print(uint32_t left_s, uint8_t *mark_index)
 {
-    if((left_s <= *last_print) && ((*last_print == 10U) || (*last_print == 7U) || (*last_print == 4U) || (*last_print == 1U))) {
-        if(*last_print == 10U) Boot_RS485_SendString("wait for start Application(10s)......\r\n");
-        else if(*last_print == 7U) Boot_RS485_SendString("wait for start Application(7s)......\r\n");
-        else if(*last_print == 4U) Boot_RS485_SendString("wait for start Application(4s)......\r\n");
-        else Boot_RS485_SendString("wait for start Application(1s)......\r\n");
-        *last_print = (uint8_t)(*last_print - 3U);
+    if(*mark_index >= BOOT_WAIT_STEPS) return;
+    if(left_s <= boot_wait_sec[*mark_index]) {
+        Boot_RS485_SendString(boot_wait_msg[*mark_index]);
+        (*mark_index)++;
     }
 }
 
+/**
+ * @brief  Bootloader 主流程
+ * @note   启动路径：
+ *         1) 读取 0x08010000 的升级标志（APP 请求升级时会写入并复位）；
+ *         2) 有标志 -> 停在 Bootloader 等升级（并擦掉标志，避免反复进入）；
+ *            无标志 -> 先给 5 秒窗口，收到命令就停下，否则校验 APP 有效后直接跳转；
+ *         3) 进入等待循环后仍有 10 秒窗口，超时且 APP 校验通过则跳转 APP。
+ */
 int main(void)
 {
     uint32_t start;
@@ -73,9 +89,9 @@ int main(void)
     }
     start = Boot_S();
     {
-        uint8_t last_print = 10U;
+        uint8_t mark = 0U;
         while(1) {
-            if(Boot_Protocol_Stay() == 0U) boot_wait_print(10U - (Boot_S() - start), &last_print);
+            if(Boot_Protocol_Stay() == 0U) boot_wait_print(10U - (Boot_S() - start), &mark);
             Boot_Protocol_Process();
             if((Boot_Protocol_Stay() == 0U) && (Boot_Protocol_UpgradeReady() == 0U) && ((Boot_S() - start) >= 10U) && (app_is_valid() != 0U)) jump_to_app();
         }

@@ -1,6 +1,9 @@
 #include "Boot_RS485.h"
 #include "Boot_Timer.h"
 
+/* 原始模式下超过该空闲时间就认为镜像传输结束（APP 侧为 1s） */
+#define RS485_RAW_IDLE_MS   500U
+
 static volatile uint8_t rx_buf[RS485_RX_BUF_LEN];
 static volatile uint16_t rx_index = 0U;
 static volatile uint8_t rx_done = 0U;
@@ -67,10 +70,16 @@ void Boot_RS485_StartRaw(void)
     __enable_irq();
 }
 
+/**
+ * @brief  查询原始模式是否已收完一帧（升级镜像）
+ * @retval 1 表示本次传输结束且尚未被取走；0 表示还没收完或已经取走过
+ * @note   结束条件：缓冲写满，或空闲超过 RS485_RAW_IDLE_MS。
+ *         raw_saved 保证同一批数据只上报一次。
+ */
 uint8_t Boot_RS485_RawFinished(void)
 {
     if(raw_saved != 0U) return 0U;
-    if((raw_done != 0U) || ((raw_len > 0U) && ((Boot_Ms() - raw_last_ms) >= 500U))) {
+    if((raw_done != 0U) || ((raw_len > 0U) && ((Boot_Ms() - raw_last_ms) >= RS485_RAW_IDLE_MS))) {
         __disable_irq();
         raw_mode = 0U;
         raw_done = 1U;
