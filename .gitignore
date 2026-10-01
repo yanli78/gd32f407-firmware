@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------- build output
+build/
+*.o
+*.d
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.crf
+*.dep
+*.lnp
+*.sct
+*.axf
+*.htm
+*.i
+*.su
+
+# ------------------------------------------------------------- Keil MDK / IDE
+Objects/
+Listings/
+DebugConfig/
+RTE/_*/
+*.uvguix.*
+*.uvoptx.bak
+*.scvd
+JLinkLog.txt
+JLinkSettings.ini
+build_app.log
+build_boot.log
+EventRecorderStub.scvd
+
+# ------------------------------------------------------------------- editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# --------------------------------------------------------------------- system
+Thumbs.db
+desktop.ini
+.DS_Store
