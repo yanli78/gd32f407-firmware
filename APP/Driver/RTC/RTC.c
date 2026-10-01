@@ -12,13 +12,7 @@
  */
  
 #include "Head.h"
-//#include "gd32f4xx.h"
-//#include "gd32f4xx_rtc.h"
 
-//#define RTC_CLOCK_SOURCE_LXTAL  // 或 RTC_CLOCK_SOURCE_IRC32K
-
-
-//uint32_t RTCSRC_FLAG = 0;
 rtc_parameter_struct rtc_initpara;  /* RTC 参数结构体 */
     
 /**
@@ -28,15 +22,7 @@ rtc_parameter_struct rtc_initpara;  /* RTC 参数结构体 */
  */
 uint8_t rtc_dec2bcd(uint8_t val)
 {
-    uint8_t bcdhigh = 0;
-
-    while (val >= 10)
-    {
-        bcdhigh++;
-        val -= 10;
-    }
-
-    return ((uint8_t)(bcdhigh << 4) | val);
+    return (uint8_t)(((val / 10U) << 4U) | (val % 10U));
 }
 
 /**
@@ -307,8 +293,7 @@ void RTC_Alarm_IRQHandler(void)
 {
     if (RESET != rtc_flag_get(RTC_FLAG_ALRM0)) /* ALARM0 中断? */
     {
-        rtc_flag_clear(RTC_FLAG_ALRM0);        /* 清除中断标志 */       
-        printf("ALARM0!\r\n");
+        rtc_flag_clear(RTC_FLAG_ALRM0);        /* 清除中断标志 */
     } 
     
     exti_flag_clear(EXTI_17);                  /* 清除中断线 17 的中断标志 */
@@ -329,34 +314,3 @@ void RTC_WKUP_IRQHandler(void)
     
     exti_flag_clear(EXTI_22);                  /* 清除中断线 22 的中断标志 */
 }
-
-void rtc_show_time(void)
-{
-//    uint32_t time_subsecond = 0;
-//    uint8_t subsecond_ss = 0,subsecond_ts = 0,subsecond_hs = 0;
-
-    rtc_current_time_get(&rtc_initpara);
-
-    /* get the subsecond value of current time, and convert it into fractional format */
-//    time_subsecond = rtc_subsecond_get();
-//    subsecond_ss=(1000-(time_subsecond*1000+1000)/400)/100;
-//    subsecond_ts=(1000-(time_subsecond*1000+1000)/400)%100/10;
-//    subsecond_hs=(1000-(time_subsecond*1000+1000)/400)%10;
-
-    printf("20%0.2x-%0.2x-%0.2x", \
-           rtc_initpara.year, rtc_initpara.month, rtc_initpara.date);
-
-    printf(" : %0.2x:%0.2x:%0.2x \r\n", \
-           rtc_initpara.hour, rtc_initpara.minute, rtc_initpara.second);
-}
-
-
-
-
-
-
-
-
-
-
-

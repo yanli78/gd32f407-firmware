@@ -50,7 +50,8 @@ void spi_flash_write_enable(void);
 /* poll the status of the write in progress (wip) flag in the flash's status register */
 void spi_flash_wait_for_write_end(void);
 
-
-void spi_flash_buffer_erase(uint32_t sector_addr,  uint32_t num_byte_to_erase);
+/* 注：原 spi_flash_buffer_erase() 已移除
+   —— 该函数未被任何代码调用，且实现有误（按页大小 256 字节步进擦除 4KB 扇区），
+      需要的场景请用 spi_flash_sector_erase() + spi_flash_buffer_write() 组合。 */
 
 #endif

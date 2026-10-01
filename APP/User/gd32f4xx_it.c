@@ -141,16 +141,7 @@ void SysTick_Handler(void)
 }
 
 
-/*!
-    \brief      this function handles SDIO interrupt request
-    \param[in]  none
-    \param[out] none
-    \retval     none
-*/
-void SDIO_IRQHandler(void)
-{
-}
-
+/* RS485（USART1）接收中断：协议层收帧 */
 void USART1_IRQHandler(void)
 {
     RS485_IRQHandler();

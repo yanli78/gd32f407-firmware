@@ -405,11 +405,6 @@
           <GroupName>Driver</GroupName>
           <Files>
             <File>
-              <FileName>ADC.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Driver\ADC\ADC.c</FilePath>
-            </File>
-            <File>
               <FileName>Analog.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Driver\ADC\Analog.c</FilePath>

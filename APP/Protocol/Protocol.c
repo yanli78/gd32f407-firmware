@@ -54,6 +54,12 @@
 #define PROTO_BOOT_FLAG_ADDR          0x08010000U
 #define PROTO_BOOT_FLAG_MAGIC         0x424F4F54U
 
+/* 片内 Flash 页大小（GD32F4xx 主存储区为 4KB/页） */
+#define PROTO_FMC_PAGE_SIZE           4096U
+/* 单帧最大参数长度，以及由此决定的帧缓冲长度（帧头尾固定 13 字节） */
+#define PROTO_MAX_PAYLOAD             140U
+#define PROTO_FRAME_MAX               (13U + PROTO_MAX_PAYLOAD)
+
 typedef struct {
     uint32_t magic;
     uint16_t device_id;
@@ -108,33 +114,88 @@ static uint32_t get_u32(const uint8_t *buf);
 static uint8_t flash_erase_range(uint32_t addr, uint32_t size);
 static uint8_t flash_write_bytes(uint32_t addr, const uint8_t *data, uint32_t size);
 
+/* 擦除 [addr, addr + size)：调用者必须传入页对齐的地址与长度 */
 static uint8_t flash_erase_range(uint32_t addr, uint32_t size)
 {
-    uint32_t end = addr + size;
+    uint32_t end;
+
+    if((size == 0U) || ((size % PROTO_FMC_PAGE_SIZE) != 0U)) return 0U;
+    if((addr % PROTO_FMC_PAGE_SIZE) != 0U) return 0U;
+    end = addr + size;
 
     fmc_unlock();
+    /* 清掉上一次操作遗留的错误标志，否则后面的编程会被直接拒绝 */
+    fmc_flag_clear(FMC_FLAG_END | FMC_FLAG_OPERR | FMC_FLAG_WPERR |
+                   FMC_FLAG_PGMERR | FMC_FLAG_PGSERR | FMC_FLAG_RDDERR);
     while(addr < end) {
         if(fmc_page_erase(addr) != FMC_READY) {
             fmc_lock();
             return 0U;
         }
-        addr += 4096U;
+        fmc_flag_clear(FMC_FLAG_END);
+        addr += PROTO_FMC_PAGE_SIZE;
     }
     fmc_lock();
     return 1U;
 }
 
+/* 写片内 Flash：主体走 32 位字编程（比逐字节编程少 3/4 的编程次数，
+   128KB 升级镜像由约 13 万次降到约 3.3 万次），
+   收尾不足 4 字节的部分用字节编程补齐，写完回读校验。 */
 static uint8_t flash_write_bytes(uint32_t addr, const uint8_t *data, uint32_t size)
 {
-    uint32_t i;
+    uint32_t i = 0U;
+    uint32_t word;
+
+    if(size == 0U) return 1U;
 
     fmc_unlock();
-    for(i = 0U; i < size; i++) {
+    fmc_flag_clear(FMC_FLAG_END | FMC_FLAG_OPERR | FMC_FLAG_WPERR |
+                   FMC_FLAG_PGMERR | FMC_FLAG_PGSERR | FMC_FLAG_RDDERR);
+
+    /* 1) 起始地址未 4 字节对齐：先按字节写 */
+    while(((addr + i) % 4U) != 0U && (i < size)) {
         if(fmc_byte_program(addr + i, data[i]) != FMC_READY) {
             fmc_lock();
             return 0U;
         }
+        if(*(volatile uint8_t *)(addr + i) != data[i]) {
+            fmc_lock();
+            return 0U;
+        }
+        i++;
     }
+
+    /* 2) 主体：32 位字编程 */
+    while((size - i) >= 4U) {
+        word = (uint32_t)data[i] |
+               ((uint32_t)data[i + 1U] << 8U) |
+               ((uint32_t)data[i + 2U] << 16U) |
+               ((uint32_t)data[i + 3U] << 24U);
+        if(fmc_word_program(addr + i, word) != FMC_READY) {
+            fmc_lock();
+            return 0U;
+        }
+        if(*(volatile uint32_t *)(addr + i) != word) {
+            fmc_lock();
+            return 0U;
+        }
+        i += 4U;
+    }
+
+    /* 3) 收尾不足 4 字节：按字节写 */
+    while(i < size) {
+        if(fmc_byte_program(addr + i, data[i]) != FMC_READY) {
+            fmc_lock();
+            return 0U;
+        }
+        if(*(volatile uint8_t *)(addr + i) != data[i]) {
+            fmc_lock();
+            return 0U;
+        }
+        i++;
+    }
+
     fmc_lock();
     return 1U;
 }
@@ -161,7 +222,7 @@ static uint8_t upgrade_execute(void)
     boot_flag.device_id = proto_cfg.device_id;
     boot_flag.baud_code = proto_cfg.baud_code;
     boot_flag.baudrate = proto_cfg.baudrate;
-    if(flash_erase_range(PROTO_BOOT_FLAG_ADDR, 4096U) == 0U) return 0U;
+    if(flash_erase_range(PROTO_BOOT_FLAG_ADDR, PROTO_FMC_PAGE_SIZE) == 0U) return 0U;
     if(flash_write_bytes(PROTO_BOOT_FLAG_ADDR, (const uint8_t *)&boot_flag, sizeof(boot_flag)) == 0U) return 0U;
     return 1U;
 }
@@ -326,18 +387,30 @@ static uint16_t crc16_modbus(const uint8_t *data, uint16_t len)
     return crc;
 }
 
+/* 十六进制文本分块发送：一段最多 63 字节 -> 126 个字符 + '\0' */
+#define PROTO_ASCII_CHUNK             63U
+
 static void bytes_to_ascii_send(const uint8_t *data, uint16_t len)
 {
-    char out[256];
-    uint16_t i;
+    char out[128];
+    uint16_t i = 0U;
+    uint16_t n;
+    uint16_t rest;
+    uint16_t chunk;
 
-    if((len * 2U) >= sizeof(out)) return;
-    for(i = 0U; i < len; i++) {
-        out[i * 2U] = hex_char(data[i] >> 4U);
-        out[i * 2U + 1U] = hex_char(data[i]);
+    /* 分块编码：原实现先拼进 char[256]，长度超过 255 字节的帧会被静默丢弃，
+       这里按 63 字节一段发送，任意合法帧长都不会丢。 */
+    while(i < len) {
+        rest = (uint16_t)(len - i);
+        chunk = (rest > PROTO_ASCII_CHUNK) ? PROTO_ASCII_CHUNK : rest;
+        for(n = 0U; n < chunk; n++) {
+            out[n * 2U] = hex_char((uint8_t)(data[i + n] >> 4U));
+            out[n * 2U + 1U] = hex_char(data[i + n]);
+        }
+        out[chunk * 2U] = '\0';
+        RS485_SendString(out);
+        i = (uint16_t)(i + chunk);
     }
-    out[len * 2U] = '\0';
-    RS485_SendString(out);
 }
 
 static void put_u16(uint8_t *buf, uint16_t *idx, uint16_t v)
@@ -455,11 +528,11 @@ static void alarm_clear(void)
 
 static void protocol_send(uint16_t id, uint8_t type, uint16_t cmd, const uint8_t *payload, uint8_t len)
 {
-    uint8_t frame[160];
+    uint8_t frame[PROTO_FRAME_MAX];
     uint16_t idx = 0U;
     uint16_t crc;
 
-    if(len > 140U) return;
+    if(len > PROTO_MAX_PAYLOAD) return;
 
     put_u16(frame, &idx, PROTO_START);
     put_u16(frame, &idx, id);
@@ -675,7 +748,7 @@ static void handle_command(uint16_t frame_id, uint8_t type, uint16_t cmd, const 
         boot_flag.baud_code = proto_cfg.baud_code;
         boot_flag.baudrate = proto_cfg.baudrate;
         protocol_ok(resp_id, cmd);
-        flash_erase_range(PROTO_BOOT_FLAG_ADDR, 4096U);
+        flash_erase_range(PROTO_BOOT_FLAG_ADDR, PROTO_FMC_PAGE_SIZE);
         flash_write_bytes(PROTO_BOOT_FLAG_ADDR, (const uint8_t *)&boot_flag, sizeof(boot_flag));
         delay_1ms(50U);
         NVIC_SystemReset();
@@ -743,10 +816,8 @@ static void process_frame(const uint8_t *frame, uint16_t len)
 
 void Xieyi_Chuli(void)
 {
-    uint8_t frame[128];
+    uint8_t frame[PROTO_FRAME_MAX];
     uint16_t len;
-    uint8_t ascii[RS485_RX_BUF_LEN];
-    uint16_t ascii_len;
 
     App_Led_Chuli(proto_cfg.auto_report);
 
@@ -763,12 +834,19 @@ void Xieyi_Chuli(void)
     }
 
     if(rs485_rx_done != 0U) {
+        uint8_t decoded = 0U;
+        uint16_t frame_len = 0U;
+
+        /* 直接在接收缓冲上做十六进制解码，省掉一次 256 字节的栈拷贝。
+           解码期间关中断（最坏约 3us @240MHz，远小于一个字节的传输时间），
+           保证 rx_done 标志与缓冲内容一致。 */
         __disable_irq();
-        ascii_len = (uint16_t)strlen((const char *)rs485_rx_buf);
-        memcpy(ascii, (const void *)rs485_rx_buf, ascii_len + 1U);
+        len = (uint16_t)strlen((const char *)rs485_rx_buf);
+        if(ascii_to_bytes(rs485_rx_buf, len, frame, sizeof(frame), &frame_len) != 0U) decoded = 1U;
         rs485_rx_done = 0U;
         __enable_irq();
-        if(ascii_to_bytes(ascii, ascii_len, frame, sizeof(frame), &len) != 0U) process_frame(frame, len);
+
+        if(decoded != 0U) process_frame(frame, frame_len);
         else protocol_error(proto_cfg.device_id);
     }
 
